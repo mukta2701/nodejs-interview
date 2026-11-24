@@ -7,41 +7,66 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+env:
+  SNYK_CLI_VERSION: '1.1309.0'
+
 jobs:
-  # Gate: runs on every pull request and push.
-  # Fails the build only for high or critical vulnerabilities.
+  # Nova Bank demo: report high and critical findings on PRs and main.
   snyk-test:
     name: snyk test (security gate)
     runs-on: ubuntu-latest
+    outputs:
+      scan-completed: ${{ steps.test.outputs.scan-completed }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 20
       - name: Install Snyk CLI
-        run: npm install -g snyk
+        run: npm install -g "snyk@$SNYK_CLI_VERSION"
       - name: Run snyk test
-        run: snyk test --severity-threshold=high
+        id: test
+        run: |
+          status=0
+          snyk test --severity-threshold=high || status=$?
+          # Exit 1 is a completed scan with findings. Keep the gate red.
+          if [[ "$status" == 0 || "$status" == 1 ]]; then
+            echo 'scan-completed=true' >> "$GITHUB_OUTPUT"
+          fi
+          exit "$status"
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
-  # Snapshot: runs only when code lands on main.
-  # Sends results to the Snyk dashboard for ongoing monitoring. Never blocks.
+  # Monitor main after a completed scan, including scans that found issues.
   snyk-monitor:
     name: snyk monitor (dashboard snapshot)
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: snyk-test
+    if: >-
+      ${{ !cancelled() && github.ref == 'refs/heads/main' &&
+          (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+          needs.snyk-test.outputs.scan-completed == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 20
       - name: Install Snyk CLI
-        run: npm install -g snyk
+        run: npm install -g "snyk@$SNYK_CLI_VERSION"
       - name: Run snyk monitor
         run: >
           snyk monitor
           --project-name=nova-bank/payments-api
+          --project-business-criticality=critical
+          --project-environment=frontend
+          --project-lifecycle=production
           --project-tags=team=payments
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
