@@ -212,3 +212,5 @@ snyk wizard
 
 In this application, the default `snyk wizard` answers will fix all the issues.
 When the wizard is done, restart the application and run the exploits again to confirm whether they are fixed.
+
+<!-- Demo: pull request to show the Snyk gate on Nova Bank Payments. -->
